@@ -76,11 +76,19 @@ gameContainer.addChild(menuContainer);
 
 /////////////////////////////////////////////
 
+let score = 0;
+const MAX_LIVES = 3;
+let lives = MAX_LIVES;
+
 const BUBBLE_TYPES = {
 	default: { texture: bubbleTexture },
 	heart: { texture: heartTexture },
 	bomb: { texture: bombTexture },
 };
+
+let IS_GAME_OVER = false;
+let IS_PAUSED = false;
+let IS_GAMEPLAY = false;
 
 //////////////// GAMEPLAY //////////////////
 
@@ -109,6 +117,48 @@ headerContainer.addChild(heartUiSprite);
 const heartsContainer = new Container();
 headerContainer.addChild(heartsContainer);
 
+function updateUILives() {
+	const initX = heartUiSprite.x + 40;
+	const initY = heartUiSprite.y;
+	const BETWEEN_X = 32;
+
+	const createLive = () => {
+		const live = new Sprite(bubbleTexture);
+		live.scale.set(0.15);
+		live.anchor.set(0.5);
+
+		return live;
+	};
+
+	if (heartsContainer.children.length < lives) {
+		while (heartsContainer.children.length < lives) {
+			const live = createLive();
+
+			live.x = initX + heartsContainer.children.length * BETWEEN_X;
+			live.y = initY;
+
+			heartsContainer.addChild(live);
+		}
+	}
+
+	for (let i = 0; i < heartsContainer.children.length; i++) {
+		const live = heartsContainer.children[i];
+
+		live.visible = lives > i;
+	}
+}
+updateUILives();
+
+function manageLives() {
+	if (lives <= 0) {
+		lives = 0;
+		showGameOver();
+	} else if (lives > MAX_LIVES) {
+		lives = MAX_LIVES;
+	}
+
+	updateUILives();
+}
 // Текст
 
 const textStyle = new TextStyle({
@@ -139,14 +189,38 @@ pauseBtn.interactive = true;
 pauseBtn.eventMode = "static";
 pauseBtn.x = 440;
 pauseBtn.y = 85;
-// pauseBtn.on("pointerdown", handlerGameplayPause);
+pauseBtn.on("pointerdown", handlerGameplayPause);
 headerContainer.addChild(pauseBtn);
 
-// function handlerGameplayPause() {
-// 	showPause();
-// }
+function handlerGameplayPause() {
+	showPause();
+}
 
 ///////////////////////////////////////////////////////
+
+function startGamePlay() {
+	resetGamePlay();
+
+	IS_GAMEPLAY = true;
+}
+
+function resetGamePlay() {
+	for (let i = 0; i < bubblesContainer.children.length; i++) {
+		bubblesContainer.children[i].disable();
+	}
+
+	for (let i = 0; i < particlesContainer.children.length; i++) {
+		particlesContainer.children[i].disable();
+	}
+
+	score = 0;
+	lives = MAX_LIVES;
+
+	updateScore();
+	manageLives();
+
+	IS_GAMEPLAY = false;
+}
 
 function createBubble(type = "default") {
 	const texture = BUBBLE_TYPES[type] && BUBBLE_TYPES[type]["texture"];
@@ -192,6 +266,7 @@ function createBubbleAt(x = 0, y = 0) {
 	bubble.scale.set(bubble.initScale);
 	bubble.x = x;
 	bubble.y = y;
+	bubble.type = type;
 
 	return bubble;
 }
@@ -241,9 +316,22 @@ function spawnBubbles() {
 }
 
 function clickBubble(e) {
+	if (!!IS_GAME_OVER || !!IS_PAUSED) return;
 	sound.play("clickBubbleSound");
 
 	createParticlesAt(this.x, this.y);
+
+	if (this.type === "heart") {
+		lives += 1;
+		manageLives();
+	} else if (this.type === "bomb") {
+		lives -= 1;
+		manageLives();
+	} else {
+		score += 1;
+		updateScore();
+	}
+
 	this.disable();
 }
 
@@ -253,6 +341,8 @@ const ADD_BUBBLE_DELAY = 500;
 let ticker = 0;
 
 app.ticker.add((delta) => {
+	if (!!IS_GAME_OVER || !!IS_PAUSED) return;
+
 	if (ticker >= ADD_BUBBLE_DELAY) {
 		ticker = 0;
 
@@ -272,7 +362,11 @@ app.ticker.add((delta) => {
 				bubble.scale.y = bubble.initScale - bubble.addRubberScale;
 				bubble.y -= bubble.initSpeed * delta;
 
-				if (bubble.y < -bubble.height / 2) {
+				if (bubble.y <= -bubble.height / 2) {
+					if (bubble.type !== "bomb") {
+						lives -= 1;
+						manageLives();
+					}
 					bubble.disable();
 				}
 			}
@@ -315,7 +409,6 @@ const Pool = {
 		if (!this.CACHE[key]) this.CACHE[key] = [];
 
 		let stream = this.CACHE[key];
-		console.log(this.CACHE);
 		let i = 0;
 		let len = stream.length;
 		let item;
@@ -345,3 +438,183 @@ const Pool = {
 		return item;
 	},
 };
+
+///////////////////////////// PAUSE ///////////////////////
+
+const pauseShading = new Graphics();
+pauseShading.beginFill(0x000000, 0.6);
+pauseShading.drawRect(-1000, -1000, 2000, 2000);
+pauseShading.endFill;
+pauseShading.interactive = true;
+pauseShading.x = app.screen.width / 2;
+pauseShading.y = app.screen.height / 2;
+pauseContainer.addChild(pauseShading);
+
+// Фон панельки паузы
+const pauseBg = new Sprite(pausePopupTexture);
+pauseBg.anchor.set(0.5);
+pauseBg.scale.set(1);
+pauseBg.initX = app.screen.width / 2;
+pauseBg.initY = app.screen.height / 2;
+pauseBg.x = pauseBg.initX;
+pauseBg.y = pauseBg.initY;
+pauseContainer.addChild(pauseBg);
+
+// кнопка Play
+const pausePlayBtn = new Sprite(playBtnTexture);
+pausePlayBtn.anchor.set(0.5);
+pausePlayBtn.scale.set(1);
+pausePlayBtn.interactive = true;
+pausePlayBtn.x = 150;
+pausePlayBtn.y = 145;
+pausePlayBtn.on("pointerdown", handlerPauseResume);
+pauseBg.addChild(pausePlayBtn);
+
+// кнопка выхода
+const exitBtn = new Sprite(exitBtnTexture);
+exitBtn.anchor.set(0.5);
+exitBtn.scale.set(1);
+exitBtn.interactive = true;
+exitBtn.x = -150;
+exitBtn.y = 145;
+exitBtn.on("pointerdown", handlerPauseHome);
+pauseBg.addChild(exitBtn);
+
+function handlerPauseResume() {
+	hidePause();
+}
+
+function handlerPauseHome() {
+	hidePause();
+	resetGamePlay();
+	showMenu();
+}
+
+function showPause() {
+	pauseShading.alpha = 0;
+	pauseBg.alpa = 0;
+	pauseBg.x = pauseBg.initX - 100;
+
+	gsap.timeline().to([pauseShading, pauseBg], { alpha: 1, duration: 0.2 }).to(pauseBg, { x: pauseBg.initX, duration: 0.4, ease: "back.out" }, 0);
+
+	pauseContainer.visible = true;
+	IS_PAUSED = true;
+}
+
+function hidePause() {
+	pauseContainer.visible = false;
+	IS_PAUSED = false;
+}
+
+////////////////////////////// GAME OVER /////////////////////////
+
+const gameOverShading = new Graphics();
+gameOverShading.beginFill(0x000000, 0.6);
+gameOverShading.drawRect(-1000, -1000, 2000, 2000);
+gameOverShading.endFill;
+gameOverShading.interactive = true;
+gameOverShading.x = app.screen.width / 2;
+gameOverShading.y = app.screen.height / 2;
+gameOverContainer.addChild(gameOverShading);
+
+// фон панельки геймовера
+const gameOverBg = new Sprite(gameOverPopupTexture);
+gameOverBg.anchor.set(0.5);
+gameOverBg.scale.set(1);
+gameOverBg.initX = app.screen.width / 2;
+gameOverBg.initY = app.screen.height / 2;
+gameOverBg.x = gameOverBg.initX;
+gameOverBg.y = gameOverBg.initY;
+gameOverContainer.addChild(gameOverBg);
+
+// кнопка Play геймовера
+const gameOverPlayBtn = new Sprite(playBtnTexture);
+gameOverPlayBtn.anchor.set(0.5);
+gameOverPlayBtn.scale.set(1);
+gameOverPlayBtn.interactive = true;
+gameOverPlayBtn.x = 150;
+gameOverPlayBtn.y = 145;
+gameOverPlayBtn.on("pointerdown", handlerGameOverNew);
+gameOverBg.addChild(gameOverPlayBtn);
+
+// кнопка выхода
+const gameOverExitBtn = new Sprite(exitBtnTexture);
+gameOverExitBtn.anchor.set(0.5);
+gameOverExitBtn.scale.set(1);
+gameOverExitBtn.interactive = true;
+gameOverExitBtn.x = -150;
+gameOverExitBtn.y = 145;
+gameOverExitBtn.on("pointerdown", handlerGameOverExit);
+gameOverBg.addChild(gameOverExitBtn);
+
+function handlerGameOverExit() {
+	hideGameOver();
+	resetGamePlay();
+	showMenu();
+}
+
+function handlerGameOverNew() {
+	startGamePlay();
+	hideGameOver();
+}
+
+function showGameOver() {
+	gameOverShading.alpha = 0;
+	gameOverBg.alpha = 0;
+	gameOverBg.x = gameOverBg.initX - 100;
+
+	gsap.timeline()
+		.to([gameOverShading, gameOverBg], { alpha: 1, duration: 0.2 })
+		.to(gameOverBg, { x: gameOverBg.initX, duretion: 0.4, ease: "back.out" }, 0);
+
+	gameOverContainer.visible = true;
+	IS_GAME_OVER = true;
+}
+
+function hideGameOver() {
+	gameOverContainer.visible = false;
+	IS_GAME_OVER = false;
+}
+
+/////////////////////////////// МЕНЮ //////////////////////////
+
+// фон меню
+const menuBg = new Sprite(menuBgTexture);
+menuBg.width = app.screen.width;
+menuBg.height = app.screen.height;
+menuContainer.addChild(menuBg);
+
+// кнопка Play в меню
+const menuPlayBtn = new Sprite(playBtnTexture);
+menuPlayBtn.anchor.set(0.5);
+menuPlayBtn.initScale = 2.2;
+menuPlayBtn.scale.set(menuPlayBtn.initScale);
+menuPlayBtn.interactive = true;
+menuPlayBtn.x = app.screen.width / 2;
+menuPlayBtn.y = app.screen.height / 2 + 50;
+menuPlayBtn.on("pointerdown", handlerMenuPlay);
+menuContainer.addChild(menuPlayBtn);
+
+function handlerMenuPlay() {
+	gsap.timeline()
+		.to(this.scale, { x: menuPlayBtn.initScale * 1.1, y: menuPlayBtn.initScale * 1.1, duration: 0.1 })
+		.to(this.scale, { x: menuPlayBtn.initScale, y: menuPlayBtn.initScale, duration: 0.1 })
+		.then(() => {
+			hideMenu();
+			startGamePlay;
+		});
+}
+
+function showMenu() {
+	menuContainer.visible = true;
+}
+
+function hideMenu() {
+	menuContainer.visible = false;
+	sound.play("startGameSound");
+}
+
+/////////////////////////////////////////////////
+
+hidePause();
+hideGameOver();
